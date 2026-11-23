@@ -60,6 +60,10 @@ type Flags struct {
 	MatchLinePrefix   string
 	CaseSensitiveKeys bool
 
+	AnonymizeKeys      string
+	AnonymizeKeysRegex string
+	AnonymizeSalt      string
+
 	ShowKeysFlat   bool
 	ShowKeysHier   bool
 	ShowKeysInfo   bool
@@ -102,6 +106,9 @@ func (f *Flags) Register() {
 	flag.BoolVar(&f.ExtractStrings, "extract-strings", false, "Check string values for JSON content and extract when available.")
 	flag.StringVar(&f.GetKey, "get-key", "", "Add a single key to list of included keys.")
 	flag.StringVar(&f.Config, "config", "", "Configuration JSON value, path to JSON5 or YAML file.")
+	flag.StringVar(&f.AnonymizeKeys, "anonymize-keys", "", "Comma-separated key patterns of real identifiers (for example device ids) to replace with stable irreversible codenames.")
+	flag.StringVar(&f.AnonymizeKeysRegex, "anonymize-keys-regex", "", "Comma-separated regular expressions matching keys of real identifiers to replace with stable irreversible codenames.")
+	flag.StringVar(&f.AnonymizeSalt, "anonymize-salt", "", "Secret salt for codename hashing, keep it stable and private to preserve joinability and prevent dictionary attacks.")
 	flag.BoolVar(&f.ShowKeysFlat, "show-keys-flat", false, "Show all available keys as flat list.")
 	flag.BoolVar(&f.ShowKeysHier, "show-keys-hier", false, "Show all available keys as hierarchy.")
 	flag.BoolVar(&f.ShowKeysInfo, "show-keys-info", false, "Show keys, their replaces and types.")

@@ -24,6 +24,7 @@ type flKey struct {
 	transposeDst     string
 	transposeKey     intOrString
 	transposeTrimmed string
+	transposePrefix  string
 	extractors       []extractor
 	parent           uint64
 }
@@ -93,6 +94,7 @@ func (p *Processor) initKey(pk, parent uint64, path []string, t Type, isZero boo
 	for tk, dst := range p.cfg.Transpose {
 		if len(k.original) > len(tk) && strings.HasPrefix(k.original, tk) {
 			scanTransposedKey(dst, tk, &k)
+			p.anonymizeTransposedKey(&k)
 
 			break
 		}
@@ -260,6 +262,7 @@ func scanTransposedKey(dst string, tk string, k *flKey) {
 
 	k.transposeDst = dst
 	k.transposeTrimmed = trimmed
+	k.transposePrefix = tk
 }
 
 type hasher struct {
@@ -691,11 +694,26 @@ func (p *Processor) prepareKeys() {
 
 		ck, ok := p.canonicalKeys[p.ck(origKey)]
 
+		if ok && p.anonymizer.matches(ck.original) {
+			// Codenames are hex strings, so the column must be typed as
+			// string even if the original identifiers looked numeric.
+			ck.t = TypeString
+			ck.tt = []Type{TypeString}
+		}
+
+		keySource := ck.original
+
+		// An identifier used as a path segment of a column (e.g. an object
+		// keyed by device ids) must not leak through the column name.
+		if an := p.anonymizer.keyName(ck.original); an != ck.original {
+			keySource = an
+		}
+
 		switch {
 		case !ok: // Can happen for meta keys like `const:X`.
 			ck.replaced = p.prepareKey(origKey)
 		case ck.transposeDst == "":
-			ck.replaced = p.prepareKey(ck.original)
+			ck.replaced = p.prepareKey(keySource)
 		default:
 			ck.replaced = p.prepareKey(ck.transposeTrimmed)
 		}

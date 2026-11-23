@@ -1,0 +1,2 @@
+{"deviceId":"SN-0001","temp":21.5,"tags":["x","y"],"byDevice":{"SN-0001":{"temp":30},"SN-0002":{"temp":31}}}
+{"deviceId":"SN-0002","temp":22.5,"tags":["z"]}

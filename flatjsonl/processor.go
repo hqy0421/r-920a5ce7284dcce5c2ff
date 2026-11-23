@@ -46,6 +46,9 @@ type Processor struct {
 	replaceKeys  map[string]string
 	replaceByKey map[string]string
 
+	// anonymizer replaces selected real identifiers with stable codenames.
+	anonymizer *anonymizer
+
 	// keys are ordered by replaced column names, indexes match values of includeKeys.
 	keys []flKey
 
@@ -117,6 +120,18 @@ func NewProcessor(f Flags, cfg Config, inputs ...Input) (*Processor, error) { //
 
 	if f.GetKey != "" {
 		cfg.IncludeKeys = append(cfg.IncludeKeys, f.GetKey)
+	}
+
+	if f.AnonymizeKeys != "" {
+		cfg.AnonymizeKeys = append(cfg.AnonymizeKeys, strings.Split(f.AnonymizeKeys, ",")...)
+	}
+
+	if f.AnonymizeKeysRegex != "" {
+		cfg.AnonymizeKeysRegex = append(cfg.AnonymizeKeysRegex, strings.Split(f.AnonymizeKeysRegex, ",")...)
+	}
+
+	if f.AnonymizeSalt != "" {
+		cfg.AnonymizeSalt = f.AnonymizeSalt
 	}
 
 	p := &Processor{
@@ -244,6 +259,13 @@ func NewProcessor(f Flags, cfg Config, inputs ...Input) (*Processor, error) { //
 			p.extractRegex[r] = extractors
 		}
 	}
+
+	anonymizer, err := newAnonymizer(p.cfg, p.ck)
+	if err != nil {
+		return nil, fmt.Errorf("anonymize keys: %w", err)
+	}
+
+	p.anonymizer = anonymizer
 
 	go p.watchMemUsage()
 
@@ -565,6 +587,9 @@ func (p *Processor) iterateForWriters() error {
 	pkIndex := make(map[uint64]int)
 	pkDst := make(map[uint64]string)
 	pkTimeFmt := make(map[uint64]string)
+	pkAnon := make(map[uint64]bool)
+	pkJSON := make(map[uint64]bool)
+	pkBase := make(map[uint64]string)
 
 	p.flKeys.Range(func(key uint64, value flKey) bool {
 		if i, ok := includeKeys[value.canonical]; ok {
@@ -572,6 +597,21 @@ func (p *Processor) iterateForWriters() error {
 
 			if value.transposeDst != "" {
 				pkDst[key] = value.transposeDst
+			}
+
+			selected := p.anonymizer.matches(value.original)
+			if selected {
+				pkAnon[key] = true
+			}
+
+			// Values of these keys may be JSON literals (keepJSON, a high
+			// cardinality parent, or a selection below the key) holding
+			// identifiers, so they are sanitized recursively rather than hashed
+			// as a whole.
+			if value.t == TypeJSON || p.anonymizer.jsonLiteral(value.original) ||
+				p.anonymizer.mayContainNested(value.original) {
+				pkJSON[key] = true
+				pkBase[key] = value.original
 			}
 		}
 
@@ -583,6 +623,9 @@ func (p *Processor) iterateForWriters() error {
 	})
 
 	wi := newWriteIterator(p, pkIndex, pkDst, pkTimeFmt)
+	wi.pkAnon = pkAnon
+	wi.pkJSON = pkJSON
+	wi.pkBase = pkBase
 
 	if err := p.w.SetupKeys(p.keys); err != nil {
 		return err
@@ -718,6 +761,9 @@ type writeIterator struct {
 	pkIndex    map[uint64]int
 	pkDst      map[uint64]string
 	pkTimeFmt  map[uint64]string
+	pkAnon     map[uint64]bool
+	pkJSON     map[uint64]bool
+	pkBase     map[uint64]string
 	p          *Processor
 	fieldLimit int
 	outTimeFmt string
@@ -824,6 +870,27 @@ func (wi *writeIterator) setValue(v Value, pk uint64, l *lineBuf) {
 	}
 
 	v.Dst = wi.pkDst[pk]
+
+	// Selected keys hold identifiers: a JSON literal is sanitized recursively so
+	// its keys and nested values are replaced too, while a scalar is replaced
+	// with a codename. A key whose selection addresses something below it may be
+	// kept as a JSON literal instead, so it is sanitized likewise.
+	switch {
+	case wi.pkAnon[pk]:
+		if wi.pkJSON[pk] && v.Type == TypeString {
+			if s, isJSON := wi.p.anonymizer.anonymizeJSON(wi.pkBase[pk], v.String); isJSON {
+				v = Value{Type: TypeString, String: s}
+
+				break
+			}
+		}
+
+		v = wi.p.anonymizer.anonymizeValue(v)
+	case wi.pkJSON[pk] && v.Type == TypeString:
+		if s, isJSON := wi.p.anonymizer.anonymizeJSON(wi.pkBase[pk], v.String); isJSON {
+			v = Value{Type: TypeString, String: s}
+		}
+	}
 
 	ev := l.values[i]
 	t := ev.Type

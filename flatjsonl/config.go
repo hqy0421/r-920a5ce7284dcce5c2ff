@@ -18,4 +18,8 @@ type Config struct {
 	KeepJSON           []string           `json:"keepJSON" yaml:"keepJSON" description:"List of keys to keep as JSON literals."`
 	KeepJSONRegex      []string           `json:"keepJSONRegex" yaml:"keepJSONRegex" description:"List of key patterns to keep as JSON literals."`
 	AllowCardinality   []string           `json:"allowCardinality" yaml:"allowCardinality" description:"List of keys to allow high cardinality of child keys."`
+
+	AnonymizeKeys      []string `json:"anonymizeKeys" yaml:"anonymizeKeys" description:"List of key patterns holding real identifiers (for example device ids) that are replaced with stable irreversible codenames."`
+	AnonymizeKeysRegex []string `json:"anonymizeKeysRegex" yaml:"anonymizeKeysRegex" description:"List of regular expressions matching keys that are replaced with stable irreversible codenames."`
+	AnonymizeSalt      string   `json:"anonymizeSalt" yaml:"anonymizeSalt" description:"Secret salt mixed into codename hashing. Keep it stable and private to preserve joinability and prevent dictionary attacks."`
 }

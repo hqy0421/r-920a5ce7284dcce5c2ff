@@ -127,6 +127,12 @@ flatjsonl -help
 Usage of flatjsonl:
   -add-sequence
         Add auto incremented sequence number.
+  -anonymize-keys string
+        Comma-separated key patterns of real identifiers (for example device ids) to replace with stable irreversible codenames.
+  -anonymize-keys-regex string
+        Comma-separated regular expressions matching keys of real identifiers to replace with stable irreversible codenames.
+  -anonymize-salt string
+        Secret salt for codename hashing, keep it stable and private to preserve joinability and prevent dictionary attacks.
   -buf-size int
         Buffer size (max length of file line) in bytes. (default 10000000)
   -case-sensitive-keys
@@ -251,6 +257,16 @@ keepJSON:
 # Use keepJSONRegex to list key patterns with arrays and objects of highly cardinal data.
 keepJSONRegex:
   - ".data.*.values"
+# Use anonymizeKeys to list keys that hold real identifiers (for example device ids).
+# Their values are overwritten with stable irreversible codenames, so published
+# files can still be joined by device without exposing the original identifier.
+anonymizeKeys:
+  - ".deviceId"
+# Use anonymizeKeysRegex to select identifiers with regular expressions.
+anonymizeKeysRegex:
+  - "^\\.sensors\\.([^.]+)$"
+# Secret salt mixed into codename hashing, keep it stable and private.
+anonymizeSalt: "change-me"
 ```
 
 Parse time is a map of original key to time pattern. See https://pkg.go.dev/time#pkg-constants for pattern rules.
@@ -304,6 +320,38 @@ be moved as multiple rows in transposed table.
 With `extractValuesRegex` config parameter, you can set a map of `regexp` matching key name to value format. 
 Currently `URL` and `JSON` are supported as formats. The string values in the matching keys would be decoded 
 and exposed as JSON.
+
+### Codenames for device identifiers
+
+When several log streams are merged and published, real device identifiers may not be allowed in the deliverables.
+`anonymizeKeys` (and `anonymizeKeysRegex`) select the columns that hold such identifiers, and their values are
+overwritten with a stable, irreversible codename:
+
+```
+flatjsonl -input devices-a.jsonl,devices-b.jsonl -csv devices.csv \
+  -anonymize-keys ".deviceId" -anonymize-salt "$(cat secret.salt)" \
+  -config publish.json
+```
+
+Codenames are the first 96 bits of `SHA-256(salt || 0x00 || value)` rendered as hex. They depend only on the salt and
+the value, so:
+
+* one real device gets one codename in every input stream, in every run and in every output,
+* numeric and string forms of the same identifier (for example `42` and `"42"`) map to one codename,
+* downstream aggregations still see the original number of distinct devices (collision probability is negligible),
+* the original cleartext never appears in any target column: values are replaced before writers see them, column names
+  generated from object keys (for example `.devices.<device id>.temp`) carry the codename too, and identifiers inside
+  JSON literals kept by `keepJSON` or a high cardinality parent are replaced both as values and as object keys,
+* transposed detail tables reference the same synthetic key: `._index` of a transposed map keyed by identifiers and
+  the parent `._sequence` keep the parent↔detail relationship intact.
+
+Selection uses the same pattern syntax as `includeKeys`: a literal flat key (`".deviceId"`), a `*` segment
+(`".sensors.*.id"`), or a regular expression in `anonymizeKeysRegex`. Selecting an object (`".devices"`) anonymizes
+its identifier-keyed children (column name segments, JSON literal keys, and transposed `._index` values); selecting a
+single object position (`".devices.*"`) anonymizes that position only.
+
+Configuring `anonymizeSalt` is strongly recommended. With an empty salt a built-in constant is used, which keeps
+codenames stable but allows dictionary attacks against known identifier formats.
 
 ## Examples
 
